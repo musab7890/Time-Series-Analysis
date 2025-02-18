@@ -201,3 +201,76 @@ def predict_and_display_image(model_path, image_path, label_map):
     plt.show()
 
 predict_and_display_image("image_classifier.h5", "test.png", label_map)
+
+
+
+import tensorflow as tf
+import matplotlib.pyplot as plt
+import numpy as np
+import cv2
+import os
+tf.config.run_functions_eagerly(True)
+
+OUTPUT_DIR = "output_images"  # Change this to your desired output directory
+# Replace with your TFRecord file path
+TFRECORD_FILE = ""
+# Create the output directory if it doesn't exist
+os.makedirs(OUTPUT_DIR, exist_ok=True)
+
+def parse_tfrecord(example_proto):
+    feature_description = {
+        'image/encoded': tf.io.FixedLenFeature([], tf.string),
+        'image/height': tf.io.FixedLenFeature([], tf.int64),
+        'image/width': tf.io.FixedLenFeature([], tf.int64),
+        'image/object/bbox/xmin': tf.io.VarLenFeature(tf.float32),
+        'image/object/bbox/xmax': tf.io.VarLenFeature(tf.float32),
+        'image/object/bbox/ymin': tf.io.VarLenFeature(tf.float32),
+        'image/object/bbox/ymax': tf.io.VarLenFeature(tf.float32),
+        'image/object/class/text': tf.io.VarLenFeature(tf.string),
+    }
+    
+    example = tf.io.parse_single_example(example_proto, feature_description)
+    
+    # Decode the image
+    image = tf.io.decode_jpeg(example['image/encoded'], channels=3)
+    
+    # Convert SparseTensors to dense
+    xmin = tf.sparse.to_dense(example['image/object/bbox/xmin'])
+    xmax = tf.sparse.to_dense(example['image/object/bbox/xmax'])
+    ymin = tf.sparse.to_dense(example['image/object/bbox/ymin'])
+    ymax = tf.sparse.to_dense(example['image/object/bbox/ymax'])
+    labels = tf.sparse.to_dense(example['image/object/class/text'])
+    
+    return image, xmin, xmax, ymin, ymax, labels
+
+# Read the TFRecord dataset
+dataset = tf.data.TFRecordDataset(TFRECORD_FILE)
+dataset = dataset.map(parse_tfrecord)
+
+def save_and_visualize(image, xmin, xmax, ymin, ymax, labels, index):
+    image = image.numpy()  # Convert Tensor to NumPy array
+    xmin, xmax, ymin, ymax, labels = xmin.numpy(), xmax.numpy(), ymin.numpy(), ymax.numpy(), labels.numpy()
+    
+    h, w, _ = image.shape
+    image = image.copy()
+
+    for i in range(len(xmin)):
+        x1, y1, x2, y2 = int(xmin[i] * w), int(ymin[i] * h), int(xmax[i] * w), int(ymax[i] * h)
+        cv2.rectangle(image, (x1, y1), (x2, y2), (0, 255, 0), 2)
+        label = labels[i].decode('utf-8')
+        cv2.putText(image, label, (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
+
+    # Save the image with bounding boxes
+    output_path = os.path.join(OUTPUT_DIR, f"image_{index}.jpg")
+    cv2.imwrite(output_path, cv2.cvtColor(image, cv2.COLOR_RGB2BGR))
+    print(f"Saved: {output_path}")
+
+    # Display (optional)
+    plt.imshow(image)
+    plt.axis("off")
+    plt.show()
+
+# Extract and save a few images
+for index, (image, xmin, xmax, ymin, ymax, labels) in enumerate(dataset.take(10)):  
+    save_and_visualize(image, xmin, xmax, ymin, ymax, labels, index)
+
