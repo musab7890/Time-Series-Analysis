@@ -1,123 +1,139 @@
 let map;
-function initMap() {
-    map = new google.maps.Map(document.getElementById("map"), {
-        center: { lat: 0, lng: 0 },
-        zoom: 2,
-    });
-    fetchDataAndPlot();
-}
+let groupMarkers = {};  // Store markers for each group
+let groupPaths = {};    // Store paths for each group
+let groupColors = {};   // Store colors for each group
 
-function fetchDataAndPlot() {
-    fetch("/data")
+// Initialize the map
+function initMap() {
+    map = new google.maps.Map(document.getElementById('map'), {
+        center: { lat: 0, lng: 0 },
+        zoom: 2
+    });
+
+    fetch('/data')
         .then(response => response.json())
         .then(data => {
-            window.groupData = data;
+            Object.keys(data).forEach(group => {
+                let groupData = data[group];
+                let color = getRandomColor();  // Assign a random color for each group
+                groupColors[group] = color;
+
+                if (groupData.stationary) {
+                    plotStationary(group, groupData, color);
+                } else {
+                    plotDriving(group, groupData, color);
+                }
+            });
         });
 }
 
-function showOnMap(group) {
-    const groupInfo = window.groupData[group];
-    if (!groupInfo) return;
+// Plot stationary group (using a single marker)
+function plotStationary(group, data, color) {
+    const position = { lat: data.lat, lng: data.long };
+    const marker = new google.maps.Marker({
+        position: position,
+        map: map,
+        title: group,
+        icon: {
+            url: 'http://maps.google.com/mapfiles/ms/icons/blue-dot.png'  // Customize as needed
+        }
+    });
 
-    map.setZoom(14);
-    const bounds = new google.maps.LatLngBounds();
+    const contentString = data.activities.map(activity => 
+        `<p><strong>${activity.timestamp}</strong>: ${activity.Activity}</p>`
+    ).join('');
 
-    if (groupInfo.stationary) {
+    const infoWindow = new google.maps.InfoWindow({
+        content: contentString
+    });
+
+    marker.addListener('click', () => {
+        infoWindow.open(map, marker);
+    });
+
+    groupMarkers[group] = marker;
+}
+
+// Plot driving group (using a polyline and markers for each point)
+function plotDriving(group, data, color) {
+    const path = data.path.map(point => ({
+        lat: point.Lat,
+        lng: point.Long
+    }));
+
+    const polyline = new google.maps.Polyline({
+        path: path,
+        geodesic: true,
+        strokeColor: color,
+        strokeOpacity: 1.0,
+        strokeWeight: 3
+    });
+
+    polyline.setMap(map);
+    groupPaths[group] = polyline;
+
+    path.forEach((point, index) => {
         const marker = new google.maps.Marker({
-            position: { lat: groupInfo.lat, lng: groupInfo.long },
+            position: point,
             map: map,
-            title: group
+            title: `${group} - ${data.path[index].Activity}`,
+            icon: getActivityIcon(data.path[index].Activity)  // Add different icons based on activity
         });
 
         const infoWindow = new google.maps.InfoWindow({
-            content: groupInfo.activities.map(a => `${a.timestamp}: ${a.Activity}`).join('<br>')
+            content: `<strong>${data.path[index].timestamp}</strong>: ${data.path[index].Activity}`
         });
-        marker.addListener("click", () => infoWindow.open(map, marker));
-        map.setCenter(marker.getPosition());
-    } else {
-        const pathCoordinates = [];
-        groupInfo.path.forEach(p => {
-            const latLng = new google.maps.LatLng(p.Lat, p.Long);
-            bounds.extend(latLng);
-            pathCoordinates.push(latLng);
-            
-            const marker = new google.maps.Marker({
-                position: latLng,
-                map: map,
-                title: p.Activity,
-                icon: getMarkerIcon(p.Activity)
-            });
-            
-            const infoWindow = new google.maps.InfoWindow({
-                content: `${p.timestamp}: ${p.Activity}`
-            });
-            marker.addListener("click", () => infoWindow.open(map, marker));
+
+        marker.addListener('click', () => {
+            infoWindow.open(map, marker);
         });
-        
-        drawSnappedPath(pathCoordinates, getRandomColor());
-        map.fitBounds(bounds);
-    }
+    });
+
+    groupMarkers[group] = polyline;
 }
 
-function getMarkerIcon(activity) {
-    const colors = {
-        "Call_Drop": "red",
-        "Data_Use": "blue",
-        "HandOver": "green",
-        "Idle": "yellow",
-        "VoLTE": "purple"
-    };
-    return {
-        path: google.maps.SymbolPath.CIRCLE,
-        scale: 6,
-        fillColor: colors[activity] || "black",
-        fillOpacity: 1,
-        strokeWeight: 1
-    };
-}
-
+// Get a random color for each group
 function getRandomColor() {
-    return "#" + Math.floor(Math.random() * 16777215).toString(16);
+    return '#' + Math.floor(Math.random()*16777215).toString(16);
 }
 
-function drawSnappedPath(pathCoordinates, color) {
-    const directionsService = new google.maps.DirectionsService();
-    const directionsRenderer = new google.maps.DirectionsRenderer({
-        suppressMarkers: true,
-        polylineOptions: {
-            strokeColor: color,
-            strokeOpacity: 1.0,
-            strokeWeight: 4,
-        },
-        map: map
-    });
-    
-    const waypoints = pathCoordinates.slice(1, -1).map(coord => ({ location: coord, stopover: false }));
-    
-    directionsService.route({
-        origin: pathCoordinates[0],
-        destination: pathCoordinates[pathCoordinates.length - 1],
-        waypoints: waypoints,
-        travelMode: google.maps.TravelMode.DRIVING
-    }, (result, status) => {
-        if (status === google.maps.DirectionsStatus.OK) {
-            directionsRenderer.setDirections(result);
-        } else {
-            console.error("Directions request failed due to " + status);
-        }
-    });
+// Get different icons for activities
+function getActivityIcon(activity) {
+    switch(activity) {
+        case 'Call_Drop':
+            return 'http://maps.google.com/mapfiles/ms/icons/red-dot.png';
+        case 'Data_Use':
+            return 'http://maps.google.com/mapfiles/ms/icons/green-dot.png';
+        case 'HandOver':
+            return 'http://maps.google.com/mapfiles/ms/icons/yellow-dot.png';
+        case 'Idle':
+            return 'http://maps.google.com/mapfiles/ms/icons/blue-dot.png';
+        case 'VoLTE':
+            return 'http://maps.google.com/mapfiles/ms/icons/purple-dot.png';
+        default:
+            return 'http://maps.google.com/mapfiles/ms/icons/blue-dot.png';
+    }
 }
 
-function openTab(evt, tabName) {
-    let i, tabcontent, tablinks;
-    tabcontent = document.getElementsByClassName("tabcontent");
-    for (i = 0; i < tabcontent.length; i++) {
-        tabcontent[i].style.display = "none";
+// Zoom into a group when clicked in the table
+function zoomIntoGroup(group) {
+    const groupData = groupPaths[group];
+    if (groupData) {
+        map.fitBounds(groupData.getBounds());
+        map.setZoom(10);  // Adjust the zoom level as needed
     }
-    tablinks = document.getElementsByClassName("tablink");
-    for (i = 0; i < tablinks.length; i++) {
-        tablinks[i].className = tablinks[i].className.replace(" active", "");
-    }
-    document.getElementById(tabName).style.display = "block";
-    evt.currentTarget.className += " active";
 }
+
+// Event listener for clicking on table rows
+document.addEventListener('DOMContentLoaded', () => {
+    const tableRows = document.querySelectorAll('.group-row');
+    tableRows.forEach(row => {
+        row.addEventListener('click', () => {
+            const groupId = row.dataset.groupId;
+            zoomIntoGroup(groupId);
+        });
+    });
+});
+
+// Load the map on window load
+window.onload = initMap;
