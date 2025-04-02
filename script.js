@@ -54,15 +54,7 @@ function showOnMap(group) {
             marker.addListener("click", () => infoWindow.open(map, marker));
         });
         
-        new google.maps.Polyline({
-            path: pathCoordinates,
-            geodesic: true,
-            strokeColor: "#FF0000",
-            strokeOpacity: 1.0,
-            strokeWeight: 2,
-            map: map
-        });
-
+        drawSnappedPath(pathCoordinates, getRandomColor());
         map.fitBounds(bounds);
     }
 }
@@ -82,6 +74,38 @@ function getMarkerIcon(activity) {
         fillOpacity: 1,
         strokeWeight: 1
     };
+}
+
+function getRandomColor() {
+    return "#" + Math.floor(Math.random() * 16777215).toString(16);
+}
+
+function drawSnappedPath(pathCoordinates, color) {
+    const directionsService = new google.maps.DirectionsService();
+    const directionsRenderer = new google.maps.DirectionsRenderer({
+        suppressMarkers: true,
+        polylineOptions: {
+            strokeColor: color,
+            strokeOpacity: 1.0,
+            strokeWeight: 4,
+        },
+        map: map
+    });
+    
+    const waypoints = pathCoordinates.slice(1, -1).map(coord => ({ location: coord, stopover: false }));
+    
+    directionsService.route({
+        origin: pathCoordinates[0],
+        destination: pathCoordinates[pathCoordinates.length - 1],
+        waypoints: waypoints,
+        travelMode: google.maps.TravelMode.DRIVING
+    }, (result, status) => {
+        if (status === google.maps.DirectionsStatus.OK) {
+            directionsRenderer.setDirections(result);
+        } else {
+            console.error("Directions request failed due to " + status);
+        }
+    });
 }
 
 function openTab(evt, tabName) {
