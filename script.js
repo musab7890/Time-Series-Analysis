@@ -26,6 +26,29 @@ function initMap() {
             });
         });
 }
+function openTab(tabName) {
+    // Hide all tab contents
+    document.querySelectorAll('.tab-content').forEach(tab => {
+        tab.style.display = 'none';
+    });
+
+    // Remove active class from all tab buttons
+    document.querySelectorAll('.tab-button').forEach(button => {
+        button.classList.remove('active');
+    });
+
+    // Show the selected tab content
+    document.getElementById(tabName).style.display = 'block';
+
+    // Add active class to the clicked button
+    document.querySelector(`[data-tab="${tabName}"]`).classList.add('active');
+}
+
+// Ensure default tab (Table View) is visible on load
+document.addEventListener('DOMContentLoaded', () => {
+    openTab('tableTab');  // Set default view to Table
+});
+
 
 // Plot stationary group (using a single marker)
 function plotStationary(group, data, color) {
