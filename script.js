@@ -1,162 +1,67 @@
-let map;
-let groupMarkers = {};  // Store markers for each group
-let groupPaths = {};    // Store paths for each group
-let groupColors = {};   // Store colors for each group
+// Assuming you already have data for events and a map initialized
 
-// Initialize the map
-function initMap() {
-    map = new google.maps.Map(document.getElementById('map'), {
-        center: { lat: 0, lng: 0 },
-        zoom: 2
-    });
+function plotPointsAndConnectLines(data) {
+    // Sort data by timestamp
+    data.sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
 
-    fetch('/data')
-        .then(response => response.json())
-        .then(data => {
-            Object.keys(data).forEach(group => {
-                let groupData = data[group];
-                let color = getRandomColor();  // Assign a random color for each group
-                groupColors[group] = color;
+    // Create an array to store the markers
+    let markers = [];
+    
+    // Loop through the sorted data and place markers
+    let previousPoint = null;
+    let allLatLng = [];  // To store the sequence of lat, lng for drawing the red line
 
-                if (groupData.stationary) {
-                    plotStationary(group, groupData, color);
-                } else {
-                    plotDriving(group, groupData, color);
-                }
-            });
-        });
-}
-function openTab(tabName) {
-    // Hide all tab contents
-    document.querySelectorAll('.tab-content').forEach(tab => {
-        tab.style.display = 'none';
-    });
-
-    // Remove active class from all tab buttons
-    document.querySelectorAll('.tab-button').forEach(button => {
-        button.classList.remove('active');
-    });
-
-    // Show the selected tab content
-    document.getElementById(tabName).style.display = 'block';
-
-    // Add active class to the clicked button
-    document.querySelector(`[data-tab="${tabName}"]`).classList.add('active');
-}
-
-// Ensure default tab (Table View) is visible on load
-document.addEventListener('DOMContentLoaded', () => {
-    openTab('tableTab');  // Set default view to Table
-});
-
-
-// Plot stationary group (using a single marker)
-function plotStationary(group, data, color) {
-    const position = { lat: data.lat, lng: data.long };
-    const marker = new google.maps.Marker({
-        position: position,
-        map: map,
-        title: group,
-        icon: {
-            url: 'http://maps.google.com/mapfiles/ms/icons/blue-dot.png'  // Customize as needed
-        }
-    });
-
-    const contentString = data.activities.map(activity => 
-        `<p><strong>${activity.timestamp}</strong>: ${activity.Activity}</p>`
-    ).join('');
-
-    const infoWindow = new google.maps.InfoWindow({
-        content: contentString
-    });
-
-    marker.addListener('click', () => {
-        infoWindow.open(map, marker);
-    });
-
-    groupMarkers[group] = marker;
-}
-
-// Plot driving group (using a polyline and markers for each point)
-function plotDriving(group, data, color) {
-    const path = data.path.map(point => ({
-        lat: point.Lat,
-        lng: point.Long
-    }));
-
-    const polyline = new google.maps.Polyline({
-        path: path,
-        geodesic: true,
-        strokeColor: color,
-        strokeOpacity: 1.0,
-        strokeWeight: 3
-    });
-
-    polyline.setMap(map);
-    groupPaths[group] = polyline;
-
-    path.forEach((point, index) => {
-        const marker = new google.maps.Marker({
-            position: point,
+    data.forEach(event => {
+        // Determine the color of the point (red or green)
+        let color = (event.Activity === 'Call Drop' || event.Activity === 'Re-Establishment Failure' || event.Activity === 'UE Lost') ? 'red' : 'green';
+        
+        // Create a marker for each event
+        let marker = new google.maps.Marker({
+            position: { lat: event.Lat, lng: event.Long },
             map: map,
-            title: `${group} - ${data.path[index].Activity}`,
-            icon: getActivityIcon(data.path[index].Activity)  // Add different icons based on activity
+            title: event.Activity,
+            icon: {
+                path: google.maps.SymbolPath.CIRCLE,
+                scale: event['Drive/Stationary'] === 'Stationary' ? 10 : 5,  // Larger for stationary
+                fillColor: color,
+                fillOpacity: 1,
+                strokeColor: 'white',
+                strokeWeight: 1
+            }
         });
 
-        const infoWindow = new google.maps.InfoWindow({
-            content: `<strong>${data.path[index].timestamp}</strong>: ${data.path[index].Activity}`
-        });
+        // Store the marker
+        markers.push(marker);
 
-        marker.addListener('click', () => {
-            infoWindow.open(map, marker);
-        });
+        // Add the current point to the list of lat/lng for drawing the line
+        allLatLng.push(new google.maps.LatLng(event.Lat, event.Long));
+
+        // Connect the current marker to the previous marker with a red line
+        if (previousPoint) {
+            const linePath = [previousPoint, marker.getPosition()];
+            const polyline = new google.maps.Polyline({
+                path: linePath,
+                geodesic: true,
+                strokeColor: 'red',
+                strokeOpacity: 1.0,
+                strokeWeight: 2
+            });
+            polyline.setMap(map);
+        }
+
+        // Update the previous point to the current marker
+        previousPoint = marker.getPosition();
     });
 
-    groupMarkers[group] = polyline;
-}
-
-// Get a random color for each group
-function getRandomColor() {
-    return '#' + Math.floor(Math.random()*16777215).toString(16);
-}
-
-// Get different icons for activities
-function getActivityIcon(activity) {
-    switch(activity) {
-        case 'Call_Drop':
-            return 'http://maps.google.com/mapfiles/ms/icons/red-dot.png';
-        case 'Data_Use':
-            return 'http://maps.google.com/mapfiles/ms/icons/green-dot.png';
-        case 'HandOver':
-            return 'http://maps.google.com/mapfiles/ms/icons/yellow-dot.png';
-        case 'Idle':
-            return 'http://maps.google.com/mapfiles/ms/icons/blue-dot.png';
-        case 'VoLTE':
-            return 'http://maps.google.com/mapfiles/ms/icons/purple-dot.png';
-        default:
-            return 'http://maps.google.com/mapfiles/ms/icons/blue-dot.png';
-    }
-}
-
-// Zoom into a group when clicked in the table
-function zoomIntoGroup(group) {
-    const groupData = groupPaths[group];
-    if (groupData) {
-        map.fitBounds(groupData.getBounds());
-        map.setZoom(10);  // Adjust the zoom level as needed
-    }
-}
-
-// Event listener for clicking on table rows
-document.addEventListener('DOMContentLoaded', () => {
-    const tableRows = document.querySelectorAll('.group-row');
-    tableRows.forEach(row => {
-        row.addEventListener('click', () => {
-            const groupId = row.dataset.groupId;
-            zoomIntoGroup(groupId);
+    // Optionally, draw a line connecting all the points at the end (optional)
+    if (allLatLng.length > 1) {
+        const polyline = new google.maps.Polyline({
+            path: allLatLng,
+            geodesic: true,
+            strokeColor: 'red',
+            strokeOpacity: 1.0,
+            strokeWeight: 2
         });
-    });
-});
-
-// Load the map on window load
-window.onload = initMap;
+        polyline.setMap(map);
+    }
+}
